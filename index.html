@@ -2,81 +2,66 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Go WebSocket Chat</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Chat Test</title>
   <style>
     body { font-family: sans-serif; background: #f8fafc; margin: 0; }
-    #chatbox {
-      width: 100%; max-width: 500px; margin: 2em auto;
-      background: #fff; border-radius: 12px; box-shadow: 0 4px 16px #0001;
-      padding: 1.5em; display: flex; flex-direction: column; min-height: 60vh;
-    }
-    #messages { flex: 1; overflow-y: auto; margin-bottom: 1em; }
-    .msg { padding: 0.4em 0.8em; margin: 0.3em 0; background: #f1f5f9; border-radius: 8px; }
+    #chat { max-width: 500px; margin: 2em auto; background: #fff; border-radius: 10px; box-shadow: 0 0 10px #0002; padding: 2em; }
+    #msgs { min-height: 200px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 1em; padding: 1em; overflow-y: auto; height: 300px; }
+    .mine { background: #dbeafe; }
+    .msg { margin: 0.2em 0; padding: 0.2em 0.7em; border-radius: 6px; }
     #sendbox { display: flex; gap: 0.5em; }
-    #input { flex: 1; padding: 0.5em; border: 1px solid #94a3b8; border-radius: 6px; }
-    #send { padding: 0.5em 1.2em; border: none; background: #3b82f6; color: white; border-radius: 6px; font-weight: bold; cursor: pointer;}
-    #send:disabled { opacity: 0.5; }
-    #status { font-size: 0.9em; color: #64748b; margin-bottom: 0.7em; }
+    #input { flex: 1; }
   </style>
 </head>
 <body>
-  <div id="chatbox">
-    <div id="status">Connecting...</div>
-    <div id="messages"></div>
+  <div id="chat">
+    <div id="msgs"></div>
     <form id="sendbox" autocomplete="off">
-      <input id="input" placeholder="Type a message..." autocomplete="off" />
-      <button id="send" type="submit">Send</button>
+      <input id="input" placeholder="Type message..." />
+      <button type="submit">Send</button>
     </form>
+    <div id="status"></div>
   </div>
   <script>
+    let ws, username;
+    username = prompt("Enter your name:");
     const wsUrl = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
-    let ws;
-    let isOpen = false;
-    const status = document.getElementById('status');
-    const messages = document.getElementById('messages');
+    const msgs = document.getElementById('msgs');
     const input = document.getElementById('input');
-    const send = document.getElementById('send');
+    const status = document.getElementById('status');
     const sendbox = document.getElementById('sendbox');
 
-    function appendMessage(text, mine=false) {
-      const msg = document.createElement('div');
-      msg.className = 'msg';
-      msg.textContent = text;
-      if (mine) msg.style.background = '#dbeafe';
-      messages.appendChild(msg);
-      messages.scrollTop = messages.scrollHeight;
+    function appendMessage(user, text) {
+      const div = document.createElement('div');
+      div.className = 'msg' + (user === username ? ' mine' : '');
+      div.textContent = `${user}: ${text}`;
+      msgs.appendChild(div);
+      msgs.scrollTop = msgs.scrollHeight;
     }
 
     function connect() {
       ws = new WebSocket(wsUrl);
-
       ws.onopen = () => {
-        isOpen = true;
-        status.textContent = "Connected";
-        send.disabled = false;
+        status.textContent = "Connected!";
+        ws.send(JSON.stringify({ user: username }));
       };
-
       ws.onclose = () => {
-        isOpen = false;
-        status.textContent = "Disconnected. Retrying in 2s…";
-        send.disabled = true;
+        status.textContent = "Disconnected. Reconnecting...";
         setTimeout(connect, 2000);
       };
-
-      ws.onerror = (e) => {
-        status.textContent = "WebSocket error";
-      };
-
+      ws.onerror = () => status.textContent = "WebSocket error!";
       ws.onmessage = (evt) => {
-        appendMessage(evt.data);
+        try {
+          const msg = JSON.parse(evt.data);
+          appendMessage(msg.user, msg.text);
+        } catch {}
       };
     }
 
     sendbox.onsubmit = (e) => {
       e.preventDefault();
-      if (!isOpen || !input.value.trim()) return;
-      ws.send(input.value);
+      if (!input.value.trim()) return;
+      ws.send(JSON.stringify({ text: input.value }));
       input.value = "";
     };
 
