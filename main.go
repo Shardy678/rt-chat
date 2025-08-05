@@ -1,16 +1,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"time"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/websocket"
 )
 
 // ----------------------------------------------------------------------------
-// Hub: maintains active clients and broadcasts messages to them.
+// Hub: maintains active clients and broadcasts messages to them with Redis persistence
 // ----------------------------------------------------------------------------
 
 type Message struct {
@@ -20,22 +22,24 @@ type Message struct {
 }
 
 type Hub struct {
-	// Registered connections.
-	clients map[*websocket.Conn]string
-	// Inbound messages from the clients.
-	broadcast chan Message
-	// Register requests from the clients.
-	register chan *websocket.Conn
-	// Unregister requests from clients.
+	clients    map[*websocket.Conn]string
+	broadcast  chan Message
+	register   chan *websocket.Conn
 	unregister chan *websocket.Conn
+	rdb        *redis.Client
+	ctx        context.Context
+	maxHistory int64
 }
 
-func newHub() *Hub {
+func newHub(rdb *redis.Client) *Hub {
 	return &Hub{
 		clients:    make(map[*websocket.Conn]string),
 		broadcast:  make(chan Message),
 		register:   make(chan *websocket.Conn),
 		unregister: make(chan *websocket.Conn),
+		rdb:        rdb,
+		ctx:        context.Background(),
+		maxHistory: 100, // keep last 100 messages
 	}
 }
 
@@ -46,6 +50,16 @@ func (h *Hub) run() {
 			h.clients[conn] = ""
 			log.Printf("client registered, total: %d", len(h.clients))
 
+			// Send chat history
+			msgs, err := h.rdb.LRange(h.ctx, "chat_history", -h.maxHistory, -1).Result()
+			if err != nil {
+				log.Printf("error fetching history: %v", err)
+			} else {
+				for _, raw := range msgs {
+					conn.WriteMessage(websocket.TextMessage, []byte(raw))
+				}
+			}
+
 		case conn := <-h.unregister:
 			if _, ok := h.clients[conn]; ok {
 				delete(h.clients, conn)
@@ -54,7 +68,12 @@ func (h *Hub) run() {
 			}
 
 		case msg := <-h.broadcast:
+			// Marshal and persist
 			b, _ := json.Marshal(msg)
+			h.rdb.RPush(h.ctx, "chat_history", b)
+			h.rdb.LTrim(h.ctx, "chat_history", -h.maxHistory, -1)
+
+			// Broadcast to active clients
 			for conn := range h.clients {
 				if err := conn.WriteMessage(websocket.TextMessage, b); err != nil {
 					log.Printf("broadcast error: %v", err)
@@ -84,15 +103,10 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		log.Printf("upgrade: %v", err)
 		return
 	}
-	// Register this client
 	hub.register <- conn
+	defer func() { hub.unregister <- conn }()
 
-	// Ensure cleanup
-	defer func() {
-		hub.unregister <- conn
-	}()
-
-	// Set up heartbeat
+	// Heartbeat
 	conn.SetReadDeadline(time.Now().Add(pongWait))
 	conn.SetPongHandler(func(string) error {
 		conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -110,7 +124,7 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// First message: user joins with name
+	// First message: user joins
 	_, userMsg, err := conn.ReadMessage()
 	if err != nil {
 		return
@@ -122,28 +136,30 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	hub.clients[conn] = userObj.User
 	log.Printf("user %q joined", userObj.User)
 
-	// Read loop: handle typing and chat messages
+	// Read loop
 	for {
 		_, msgData, err := conn.ReadMessage()
 		if err != nil {
 			log.Printf("read error: %v", err)
 			continue
 		}
-		// Parse incoming message; clients send either Text or Typing flag
 		var incoming Message
 		if err := json.Unmarshal(msgData, &incoming); err != nil {
 			continue
 		}
-		// Always use the username associated with the connection
 		incoming.User = hub.clients[conn]
-
-		// Broadcast typing indicator or chat message
 		hub.broadcast <- incoming
 	}
 }
 
 func main() {
-	hub := newHub()
+	// Initialize Redis client
+	rdb := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+	defer rdb.Close()
+
+	hub := newHub(rdb)
 	go hub.run()
 
 	http.Handle("/", http.FileServer(http.Dir(".")))
@@ -151,6 +167,6 @@ func main() {
 		serveWs(hub, w, r)
 	})
 
-	log.Println("Broadcasting WebSocket server listening on :8080/ws")
+	log.Println("Broadcasting WebSocket server with Redis persistence listening on :8080/ws")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
