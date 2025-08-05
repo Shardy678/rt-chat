@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Go WebSocket Chat</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body { font-family: sans-serif; background: #f8fafc; margin: 0; }
+    #chatbox {
+      width: 100%; max-width: 500px; margin: 2em auto;
+      background: #fff; border-radius: 12px; box-shadow: 0 4px 16px #0001;
+      padding: 1.5em; display: flex; flex-direction: column; min-height: 60vh;
+    }
+    #messages { flex: 1; overflow-y: auto; margin-bottom: 1em; }
+    .msg { padding: 0.4em 0.8em; margin: 0.3em 0; background: #f1f5f9; border-radius: 8px; }
+    #sendbox { display: flex; gap: 0.5em; }
+    #input { flex: 1; padding: 0.5em; border: 1px solid #94a3b8; border-radius: 6px; }
+    #send { padding: 0.5em 1.2em; border: none; background: #3b82f6; color: white; border-radius: 6px; font-weight: bold; cursor: pointer;}
+    #send:disabled { opacity: 0.5; }
+    #status { font-size: 0.9em; color: #64748b; margin-bottom: 0.7em; }
+  </style>
+</head>
+<body>
+  <div id="chatbox">
+    <div id="status">Connecting...</div>
+    <div id="messages"></div>
+    <form id="sendbox" autocomplete="off">
+      <input id="input" placeholder="Type a message..." autocomplete="off" />
+      <button id="send" type="submit">Send</button>
+    </form>
+  </div>
+  <script>
+    const wsUrl = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
+    let ws;
+    let isOpen = false;
+    const status = document.getElementById('status');
+    const messages = document.getElementById('messages');
+    const input = document.getElementById('input');
+    const send = document.getElementById('send');
+    const sendbox = document.getElementById('sendbox');
+
+    function appendMessage(text, mine=false) {
+      const msg = document.createElement('div');
+      msg.className = 'msg';
+      msg.textContent = text;
+      if (mine) msg.style.background = '#dbeafe';
+      messages.appendChild(msg);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    function connect() {
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        isOpen = true;
+        status.textContent = "Connected";
+        send.disabled = false;
+      };
+
+      ws.onclose = () => {
+        isOpen = false;
+        status.textContent = "Disconnected. Retrying in 2s…";
+        send.disabled = true;
+        setTimeout(connect, 2000);
+      };
+
+      ws.onerror = (e) => {
+        status.textContent = "WebSocket error";
+      };
+
+      ws.onmessage = (evt) => {
+        appendMessage(evt.data);
+      };
+    }
+
+    sendbox.onsubmit = (e) => {
+      e.preventDefault();
+      if (!isOpen || !input.value.trim()) return;
+      ws.send(input.value);
+      input.value = "";
+    };
+
+    connect();
+  </script>
+</body>
+</html>
