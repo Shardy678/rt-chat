@@ -1,179 +1,183 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Chat App - Login/Register</title>
-  <style>
-    body { font-family: sans-serif; background: #f8fafc; margin: 0; }
-    #chat, #auth { max-width: 400px; margin: 3em auto; background: #fff; border-radius: 10px; box-shadow: 0 0 10px #0002; padding: 2em; }
-    #msgs { min-height: 200px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 1em; padding: 1em; overflow-y: auto; height: 300px; }
-    .mine { background: #dbeafe; }
-    .msg { margin: 0.2em 0; padding: 0.2em 0.7em; border-radius: 6px; }
-    #sendbox { display: flex; gap: 0.5em; }
-    #input { flex: 1; }
-    #status { font-style: italic; color: #555; height: 1.2em; }
-    #auth input { margin-bottom: 0.8em; width: 100%; padding: 0.6em; }
-    #auth button { width: 100%; padding: 0.6em; }
-    #auth-toggle { background: none; color: #2563eb; border: none; cursor: pointer; margin-top: 1em; text-decoration: underline; }
-  </style>
-</head>
-<body>
-  <div id="auth">
-    <h2 id="auth-title">Login</h2>
-    <input id="auth-user" autocomplete="username" placeholder="Username">
-    <input id="auth-pass" autocomplete="current-password" type="password" placeholder="Password">
-    <button id="auth-submit">Login</button>
-    <button id="auth-toggle">Need an account? Register</button>
-    <div id="auth-status"></div>
-  </div>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Chat App - Login/Register</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div id="auth">
+      <h2 id="auth-title">Login</h2>
+      <form id="auth-form" autocomplete="off">
+        <input id="auth-user" autocomplete="username" placeholder="Username" />
+        <input
+          id="auth-pass"
+          autocomplete="current-password"
+          type="password"
+          placeholder="Password"
+        />
+        <button id="auth-submit">Login</button>
+      </form>
+      <button id="auth-toggle">Need an account? Register</button>
+      <div id="auth-status"></div>
+    </div>
 
-  <div id="chat" style="display:none">
-    <div id="msgs"></div>
-    <form id="sendbox" autocomplete="off">
-      <input id="input" placeholder="Type message..." />
-      <button type="submit">Send</button>
-    </form>
-    <div id="status"></div>
-  </div>
+    <div id="chat" style="display: none">
+      <div id="msgs"></div>
+      <form id="sendbox" autocomplete="off">
+        <input id="input" placeholder="Type message..." />
+        <button type="submit">Send</button>
+      </form>
+      <div id="status"></div>
+    </div>
 
-  <script>
-    let ws, username, token;
-    const msgs = document.getElementById('msgs');
-    const input = document.getElementById('input');
-    const status = document.getElementById('status');
-    const sendbox = document.getElementById('sendbox');
+    <script>
+      let ws, username, token;
+      const msgs = document.getElementById("msgs");
+      const input = document.getElementById("input");
+      const status = document.getElementById("status");
+      const sendbox = document.getElementById("sendbox");
 
-    // --- Auth UI refs
-    const auth = document.getElementById('auth');
-    const authTitle = document.getElementById('auth-title');
-    const authUser = document.getElementById('auth-user');
-    const authPass = document.getElementById('auth-pass');
-    const authSubmit = document.getElementById('auth-submit');
-    const authToggle = document.getElementById('auth-toggle');
-    const authStatus = document.getElementById('auth-status');
-    let isLogin = true;
+      // --- Auth UI refs
+      const auth = document.getElementById("auth");
+      const authTitle = document.getElementById("auth-title");
+      const authUser = document.getElementById("auth-user");
+      const authPass = document.getElementById("auth-pass");
+      const authSubmit = document.getElementById("auth-submit");
+      const authToggle = document.getElementById("auth-toggle");
+      const authStatus = document.getElementById("auth-status");
+      let isLogin = true;
 
-    // --- Auth form handlers
-    authSubmit.onclick = async (e) => {
-      e.preventDefault();
-      const user = authUser.value.trim();
-      const pass = authPass.value;
-      if (!user || !pass) {
-        authStatus.textContent = "Username and password required.";
-        return;
-      }
-      authStatus.textContent = isLogin ? "Logging in..." : "Registering...";
-      try {
-        const resp = await fetch(isLogin ? "/login" : "/register", {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user, password: pass })
-        });
-        if (!resp.ok) {
-          const text = await resp.text();
-          authStatus.textContent = text || (isLogin ? "Login failed" : "Registration failed");
+      // --- Auth form handlers
+      authSubmit.onclick = async (e) => {
+        e.preventDefault();
+        const user = authUser.value.trim();
+        const pass = authPass.value;
+        if (!user || !pass) {
+          authStatus.textContent = "Username and password required.";
           return;
         }
-        if (isLogin) {
-          const data = await resp.json();
-          token = data.token;
-          username = user;
-          showChat();
-        } else {
-          authStatus.textContent = "Registration successful! Now log in.";
-          setTimeout(() => toggleAuth(true), 1200);
-        }
-      } catch (err) {
-        authStatus.textContent = (isLogin ? "Login error: " : "Register error: ") + err;
-      }
-    };
-
-    function toggleAuth(toLogin) {
-      isLogin = toLogin;
-      authTitle.textContent = isLogin ? "Login" : "Register";
-      authSubmit.textContent = isLogin ? "Login" : "Register";
-      authToggle.textContent = isLogin ? "Need an account? Register" : "Already have an account? Login";
-      authStatus.textContent = "";
-      authPass.value = "";
-    }
-    authToggle.onclick = (e) => {
-      e.preventDefault();
-      toggleAuth(!isLogin);
-    };
-
-    // --- Chat UI ---
-    function showChat() {
-      auth.style.display = "none";
-      document.getElementById('chat').style.display = "";
-      connect();
-    }
-
-    let typingTimeout;
-    const TYPING_DELAY = 10000;
-    input.addEventListener('input', () => {
-      if (!ws || ws.readyState !== 1) return;
-      if (typingTimeout === undefined) sendTyping(true);
-      clearTimeout(typingTimeout);
-      typingTimeout = setTimeout(() => {
-        sendTyping(false);
-        typingTimeout = undefined;
-      }, TYPING_DELAY);
-    });
-
-    function sendTyping(isTyping) {
-      if (ws && ws.readyState === 1)
-        ws.send(JSON.stringify({ typing: isTyping }));
-    }
-
-    function appendMessage(user, text) {
-      const div = document.createElement('div');
-      div.className = 'msg' + (user === username ? ' mine' : '');
-      div.textContent = `${user}: ${text}`;
-      msgs.appendChild(div);
-      msgs.scrollTop = msgs.scrollHeight;
-    }
-    function showTyping(user) {
-      status.textContent = `${user} is typing...`;
-    }
-    function clearTyping() {
-      status.textContent = '';
-    }
-
-    function connect() {
-      ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
-      ws.onopen = () => {
-        status.textContent = "Connected!";
-      };
-      ws.onclose = () => {
-        status.textContent = "Disconnected. Reconnecting...";
-        setTimeout(connect, 2000);
-      };
-      ws.onerror = () => status.textContent = "WebSocket error!";
-      ws.onmessage = (evt) => {
+        authStatus.textContent = isLogin ? "Logging in..." : "Registering...";
         try {
-          const msg = JSON.parse(evt.data);
-          if (msg.typing) {
-            showTyping(msg.user);
-            setTimeout(clearTyping, TYPING_DELAY + 200);
-          } else if (msg.text) {
-            clearTyping();
-            appendMessage(msg.user, msg.text);
+          const resp = await fetch(isLogin ? "/login" : "/register", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user, password: pass }),
+          });
+          if (!resp.ok) {
+            const text = await resp.text();
+            authStatus.textContent =
+              text || (isLogin ? "Login failed" : "Registration failed");
+            return;
           }
-        } catch {}
+          if (isLogin) {
+            const data = await resp.json();
+            token = data.token;
+            username = user;
+            showChat();
+          } else {
+            authStatus.textContent = "Registration successful! Now log in.";
+            setTimeout(() => toggleAuth(true), 1200);
+          }
+        } catch (err) {
+          authStatus.textContent =
+            (isLogin ? "Login error: " : "Register error: ") + err;
+        }
       };
-    }
 
-    sendbox.onsubmit = (e) => {
-      e.preventDefault();
-      if (!input.value.trim() || !ws || ws.readyState !== 1) return;
-      if (typingTimeout !== undefined) {
-        clearTimeout(typingTimeout);
-        sendTyping(false);
-        typingTimeout = undefined;
+      function toggleAuth(toLogin) {
+        isLogin = toLogin;
+        authTitle.textContent = isLogin ? "Login" : "Register";
+        authSubmit.textContent = isLogin ? "Login" : "Register";
+        authToggle.textContent = isLogin
+          ? "Need an account? Register"
+          : "Already have an account? Login";
+        authStatus.textContent = "";
+        authPass.value = "";
       }
-      ws.send(JSON.stringify({ text: input.value }));
-      input.value = "";
-    };
-  </script>
-</body>
+      authToggle.onclick = (e) => {
+        e.preventDefault();
+        toggleAuth(!isLogin);
+      };
+
+      // --- Chat UI ---
+      function showChat() {
+        auth.style.display = "none";
+        document.getElementById("chat").style.display = "";
+        connect();
+      }
+
+      let typingTimeout;
+      const TYPING_DELAY = 10000;
+      input.addEventListener("input", () => {
+        if (!ws || ws.readyState !== 1) return;
+        if (typingTimeout === undefined) sendTyping(true);
+        clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(() => {
+          sendTyping(false);
+          typingTimeout = undefined;
+        }, TYPING_DELAY);
+      });
+
+      function sendTyping(isTyping) {
+        if (ws && ws.readyState === 1)
+          ws.send(JSON.stringify({ typing: isTyping }));
+      }
+
+      function appendMessage(user, text) {
+        const div = document.createElement("div");
+        div.className = "msg" + (user === username ? " mine" : "");
+        div.textContent = `${user}: ${text}`;
+        msgs.appendChild(div);
+        msgs.scrollTop = msgs.scrollHeight;
+      }
+      function showTyping(user) {
+        status.textContent = `${user} is typing...`;
+      }
+      function clearTyping() {
+        status.textContent = "";
+      }
+
+      function connect() {
+        ws = new WebSocket(
+          (location.protocol === "https:" ? "wss://" : "ws://") +
+            location.host +
+            "/ws"
+        );
+        ws.onopen = () => {
+          status.textContent = "Connected!";
+        };
+        ws.onclose = () => {
+          status.textContent = "Disconnected. Reconnecting...";
+          setTimeout(connect, 2000);
+        };
+        ws.onerror = () => (status.textContent = "WebSocket error!");
+        ws.onmessage = (evt) => {
+          try {
+            const msg = JSON.parse(evt.data);
+            if (msg.typing) {
+              showTyping(msg.user);
+              setTimeout(clearTyping, TYPING_DELAY + 200);
+            } else if (msg.text) {
+              clearTyping();
+              appendMessage(msg.user, msg.text);
+            }
+          } catch {}
+        };
+      }
+
+      sendbox.onsubmit = (e) => {
+        e.preventDefault();
+        if (!input.value.trim() || !ws || ws.readyState !== 1) return;
+        if (typingTimeout !== undefined) {
+          clearTimeout(typingTimeout);
+          sendTyping(false);
+          typingTimeout = undefined;
+        }
+        ws.send(JSON.stringify({ text: input.value }));
+        input.value = "";
+      };
+    </script>
+  </body>
 </html>

@@ -323,7 +323,11 @@ func main() {
 	go hub.run()
 	log.Println("[Main] Hub started")
 
-	http.Handle("/", http.FileServer(http.Dir(".")))
+	fs := http.FileServer(http.Dir("./static"))
+	http.Handle("/static/", http.StripPrefix("/static/", fs))
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "index.html")
+	})
 	http.Handle("/register", registerHandler(rdb))
 	http.Handle("/login", loginHandler(rdb))
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {

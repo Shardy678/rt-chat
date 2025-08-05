@@ -1,0 +1,66 @@
+body {
+  font-family: sans-serif;
+  background: #f8fafc;
+  margin: 0;
+}
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+#chat,
+#auth {
+  max-width: 400px;
+  margin: 3em auto;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 0 10px #0002;
+  padding: 2em;
+}
+#msgs {
+  min-height: 200px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  margin-bottom: 1em;
+  padding: 1em;
+  overflow-y: auto;
+  height: 300px;
+}
+.mine {
+  background: #dbeafe;
+}
+.msg {
+  margin: 0.2em 0;
+  padding: 0.2em 0.7em;
+  border-radius: 6px;
+}
+#sendbox {
+  display: flex;
+  gap: 0.5em;
+}
+#sendbox input {
+  flex: 1 1 0;
+  min-width: 0;
+}
+#status {
+  font-style: italic;
+  color: #555;
+  height: 1.2em;
+}
+#auth input {
+  width: 100%;
+  margin-bottom: 0.8em;
+  padding: 0.6em;
+}
+#auth button {
+  width: 100%;
+  padding: 0.6em;
+}
+#auth-toggle {
+  background: none;
+  color: #2563eb;
+  border: none;
+  cursor: pointer;
+  margin-top: 1em;
+  text-decoration: underline;
+}
