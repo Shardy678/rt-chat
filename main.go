@@ -1,4 +1,3 @@
-// main.go
 package main
 
 import (
@@ -15,8 +14,9 @@ import (
 // ----------------------------------------------------------------------------
 
 type Message struct {
-	User string `json:"user"`
-	Text string `json:"text"`
+	User   string `json:"user"`
+	Text   string `json:"text,omitempty"`
+	Typing bool   `json:"typing,omitempty"`
 }
 
 type Hub struct {
@@ -56,7 +56,6 @@ func (h *Hub) run() {
 		case msg := <-h.broadcast:
 			b, _ := json.Marshal(msg)
 			for conn := range h.clients {
-				// send to each; if error, assume broken and unregister
 				if err := conn.WriteMessage(websocket.TextMessage, b); err != nil {
 					log.Printf("broadcast error: %v", err)
 					h.unregister <- conn
@@ -110,6 +109,8 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
+
+	// First message: user joins with name
 	_, userMsg, err := conn.ReadMessage()
 	if err != nil {
 		return
@@ -121,19 +122,23 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	hub.clients[conn] = userObj.User
 	log.Printf("user %q joined", userObj.User)
 
-	// Read loop: on each message, push to hub.broadcast
+	// Read loop: handle typing and chat messages
 	for {
 		_, msgData, err := conn.ReadMessage()
 		if err != nil {
 			log.Printf("read error: %v", err)
 			continue
 		}
-		var msg Message
-		if err := json.Unmarshal(msgData, &msg); err == nil {
-			// Always use the username associated with the connection (not what client sends)
-			msg.User = hub.clients[conn]
-			hub.broadcast <- msg
+		// Parse incoming message; clients send either Text or Typing flag
+		var incoming Message
+		if err := json.Unmarshal(msgData, &incoming); err != nil {
+			continue
 		}
+		// Always use the username associated with the connection
+		incoming.User = hub.clients[conn]
+
+		// Broadcast typing indicator or chat message
+		hub.broadcast <- incoming
 	}
 }
 
@@ -142,7 +147,6 @@ func main() {
 	go hub.run()
 
 	http.Handle("/", http.FileServer(http.Dir(".")))
-
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(hub, w, r)
 	})

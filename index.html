@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Chat Test</title>
+  <title>Chat Test with Typing Indicator</title>
   <style>
     body { font-family: sans-serif; background: #f8fafc; margin: 0; }
     #chat { max-width: 500px; margin: 2em auto; background: #fff; border-radius: 10px; box-shadow: 0 0 10px #0002; padding: 2em; }
@@ -11,6 +11,7 @@
     .msg { margin: 0.2em 0; padding: 0.2em 0.7em; border-radius: 6px; }
     #sendbox { display: flex; gap: 0.5em; }
     #input { flex: 1; }
+    #status { font-style: italic; color: #555; height: 1.2em; }
   </style>
 </head>
 <body>
@@ -31,12 +32,40 @@
     const status = document.getElementById('status');
     const sendbox = document.getElementById('sendbox');
 
+    let typingTimeout;
+    const TYPING_DELAY = 10000; // ms
+
+    function sendTyping(isTyping) {
+      ws.send(JSON.stringify({ typing: isTyping }));
+    }
+
+    input.addEventListener('input', () => {
+      // on first keystroke, notify typing
+      if (typingTimeout === undefined) {
+        sendTyping(true);
+      }
+      clearTimeout(typingTimeout);
+      // after delay, send stop typing
+      typingTimeout = setTimeout(() => {
+        sendTyping(false);
+        typingTimeout = undefined;
+      }, TYPING_DELAY);
+    });
+
     function appendMessage(user, text) {
       const div = document.createElement('div');
       div.className = 'msg' + (user === username ? ' mine' : '');
       div.textContent = `${user}: ${text}`;
       msgs.appendChild(div);
       msgs.scrollTop = msgs.scrollHeight;
+    }
+
+    function showTyping(user) {
+      status.textContent = `${user} is typing...`;
+    }
+
+    function clearTyping() {
+      status.textContent = '';
     }
 
     function connect() {
@@ -53,7 +82,14 @@
       ws.onmessage = (evt) => {
         try {
           const msg = JSON.parse(evt.data);
-          appendMessage(msg.user, msg.text);
+          if (msg.typing) {
+            showTyping(msg.user);
+            // clear after a short while in case no stop event arrives
+            setTimeout(clearTyping, TYPING_DELAY + 200);
+          } else if (msg.text) {
+            clearTyping();
+            appendMessage(msg.user, msg.text);
+          }
         } catch {}
       };
     }
@@ -61,6 +97,12 @@
     sendbox.onsubmit = (e) => {
       e.preventDefault();
       if (!input.value.trim()) return;
+      // if user was typing, send stop typing immediately
+      if (typingTimeout !== undefined) {
+        clearTimeout(typingTimeout);
+        sendTyping(false);
+        typingTimeout = undefined;
+      }
       ws.send(JSON.stringify({ text: input.value }));
       input.value = "";
     };
