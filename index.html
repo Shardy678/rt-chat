@@ -1,35 +1,34 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <title>Chat App - Login/Register</title>
+    <title>Чат - Вход/Регистрация</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="/static/styles.css" type="text/css"/>
   </head>
   <body>
     <div id="auth">
-      <h2 id="auth-title">Login</h2>
+      <h2 id="auth-title">Вход</h2>
       <form id="auth-form" autocomplete="off">
-        <input id="auth-user" autocomplete="username" placeholder="Username" />
+        <input id="auth-user" autocomplete="username" placeholder="Имя пользователя" />
         <input
           id="auth-pass"
           autocomplete="current-password"
           type="password"
-          placeholder="Password"
+          placeholder="Пароль"
         />
-        <input id="room-input" placeholder="Room name (default: general)" />
-        <!-- ROOM-RELATED -->
-        <button id="auth-submit">Login</button>
+        <input id="room-input" placeholder="Название комнаты (по умолчанию: general)" />
+        <button id="auth-submit">Войти</button>
       </form>
-      <button id="auth-toggle">Need an account? Register</button>
+      <button id="auth-toggle">Нет аккаунта? Зарегистрироваться</button>
       <div id="auth-status"></div>
     </div>
 
     <div id="chat" style="display: none">
       <div id="msgs"></div>
       <form id="sendbox" autocomplete="off">
-        <input id="input" placeholder="Type message..." />
-        <button type="submit">Send</button>
+        <input id="input" placeholder="Введите сообщение..." />
+        <button type="submit">Отправить</button>
       </form>
       <div id="status"></div>
       <div id="roomname"></div>
@@ -37,15 +36,15 @@
 
     <script>
       let ws, username, token;
-      let room = ""; 
+      let room = "";
       const msgs = document.getElementById("msgs");
       const input = document.getElementById("input");
       const status = document.getElementById("status");
       const sendbox = document.getElementById("sendbox");
-      const roomInput = document.getElementById("room-input"); 
+      const roomInput = document.getElementById("room-input");
       const roomNameDiv = document.getElementById("roomname");
 
-      // --- Auth UI refs
+      // --- Ссылки на элементы UI авторизации
       const auth = document.getElementById("auth");
       const authTitle = document.getElementById("auth-title");
       const authUser = document.getElementById("auth-user");
@@ -55,21 +54,21 @@
       const authStatus = document.getElementById("auth-status");
       let isLogin = true;
 
-      // --- Auth form handlers
+      // --- Ручки формы авторизации
       authSubmit.onclick = async (e) => {
         e.preventDefault();
         const user = authUser.value.trim();
         const pass = authPass.value;
-        room = roomInput.value.trim() || "general"; 
+        room = roomInput.value.trim() || "general";
         if (!user || !pass) {
-          authStatus.textContent = "Username and password required.";
+          authStatus.textContent = "Имя пользователя и пароль обязательны.";
           return;
         }
         if (!room) {
-          authStatus.textContent = "Room name required.";
+          authStatus.textContent = "Необходимо указать комнату.";
           return;
         }
-        authStatus.textContent = isLogin ? "Logging in..." : "Registering...";
+        authStatus.textContent = isLogin ? "Вход..." : "Регистрация...";
         try {
           const resp = await fetch(isLogin ? "/login" : "/register", {
             method: "POST",
@@ -79,7 +78,7 @@
           if (!resp.ok) {
             const text = await resp.text();
             authStatus.textContent =
-              text || (isLogin ? "Login failed" : "Registration failed");
+              text || (isLogin ? "Ошибка входа" : "Ошибка регистрации");
             return;
           }
           if (isLogin) {
@@ -88,22 +87,22 @@
             username = user;
             showChat();
           } else {
-            authStatus.textContent = "Registration successful! Now log in.";
+            authStatus.textContent = "Регистрация успешна! Теперь войдите.";
             setTimeout(() => toggleAuth(true), 1200);
           }
         } catch (err) {
           authStatus.textContent =
-            (isLogin ? "Login error: " : "Register error: ") + err;
+            (isLogin ? "Ошибка входа: " : "Ошибка регистрации: ") + err;
         }
       };
 
       function toggleAuth(toLogin) {
         isLogin = toLogin;
-        authTitle.textContent = isLogin ? "Login" : "Register";
-        authSubmit.textContent = isLogin ? "Login" : "Register";
+        authTitle.textContent = isLogin ? "Вход" : "Регистрация";
+        authSubmit.textContent = isLogin ? "Войти" : "Зарегистрироваться";
         authToggle.textContent = isLogin
-          ? "Need an account? Register"
-          : "Already have an account? Login";
+          ? "Нет аккаунта? Зарегистрироваться"
+          : "Уже есть аккаунт? Войти";
         authStatus.textContent = "";
         authPass.value = "";
       }
@@ -112,11 +111,11 @@
         toggleAuth(!isLogin);
       };
 
-      // --- Chat UI ---
+      // --- UI чата ---
       function showChat() {
         auth.style.display = "none";
         document.getElementById("chat").style.display = "";
-        roomNameDiv.textContent = "Room: " + room; 
+        roomNameDiv.textContent = "Комната: " + room;
         msgs.innerHTML = "";
         connect();
       }
@@ -135,7 +134,7 @@
 
       function sendTyping(isTyping) {
         if (ws && ws.readyState === 1)
-          ws.send(JSON.stringify({ typing: isTyping })); 
+          ws.send(JSON.stringify({ typing: isTyping }));
       }
 
       function appendMessage(user, text) {
@@ -146,12 +145,13 @@
         msgs.scrollTop = msgs.scrollHeight;
       }
       function showTyping(user) {
-        status.textContent = `${user} is typing...`;
+        status.textContent = `${user} печатает...`;
       }
       function clearTyping() {
         status.textContent = "";
       }
 
+      // --- Подключение к WebSocket ---
       function connect() {
         ws = new WebSocket(
           (location.protocol === "https:" ? "wss://" : "ws://") +
@@ -160,17 +160,17 @@
             encodeURIComponent(room)
         );
         ws.onopen = () => {
-          status.textContent = "Connected!";
+          status.textContent = "Соединено!";
         };
         ws.onclose = () => {
-          status.textContent = "Disconnected. Reconnecting...";
+          status.textContent = "Отключено. Переподключение...";
           setTimeout(connect, 2000);
         };
-        ws.onerror = () => (status.textContent = "WebSocket error!");
+        ws.onerror = () => (status.textContent = "Ошибка WebSocket!");
         ws.onmessage = (evt) => {
           try {
             const msg = JSON.parse(evt.data);
-            console.log("Received:", msg);
+            console.log("Получено:", msg);
             if (msg.typing) {
               showTyping(msg.user);
               setTimeout(clearTyping, TYPING_DELAY + 200);
@@ -179,11 +179,12 @@
               appendMessage(msg.user, msg.text);
             }
           } catch (e) {
-            console.error("WS message error", e);
+            console.error("Ошибка обработки WS-сообщения", e);
           }
         };
       }
 
+      // --- Отправка сообщения ---
       sendbox.onsubmit = (e) => {
         e.preventDefault();
         if (!input.value.trim() || !ws || ws.readyState !== 1) return;
