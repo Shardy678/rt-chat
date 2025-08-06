@@ -17,6 +17,8 @@
           type="password"
           placeholder="Password"
         />
+        <input id="room-input" placeholder="Room name (default: general)" />
+        <!-- ROOM-RELATED -->
         <button id="auth-submit">Login</button>
       </form>
       <button id="auth-toggle">Need an account? Register</button>
@@ -30,14 +32,18 @@
         <button type="submit">Send</button>
       </form>
       <div id="status"></div>
+      <div id="roomname"></div>
     </div>
 
     <script>
       let ws, username, token;
+      let room = ""; // ROOM-RELATED
       const msgs = document.getElementById("msgs");
       const input = document.getElementById("input");
       const status = document.getElementById("status");
       const sendbox = document.getElementById("sendbox");
+      const roomInput = document.getElementById("room-input"); // ROOM-RELATED
+      const roomNameDiv = document.getElementById("roomname");
 
       // --- Auth UI refs
       const auth = document.getElementById("auth");
@@ -54,8 +60,13 @@
         e.preventDefault();
         const user = authUser.value.trim();
         const pass = authPass.value;
+        room = roomInput.value.trim() || "general"; // ROOM-RELATED
         if (!user || !pass) {
           authStatus.textContent = "Username and password required.";
+          return;
+        }
+        if (!room) {
+          authStatus.textContent = "Room name required.";
           return;
         }
         authStatus.textContent = isLogin ? "Logging in..." : "Registering...";
@@ -105,6 +116,8 @@
       function showChat() {
         auth.style.display = "none";
         document.getElementById("chat").style.display = "";
+        roomNameDiv.textContent = "Room: " + room; // ROOM-RELATED
+        msgs.innerHTML = "";
         connect();
       }
 
@@ -122,7 +135,7 @@
 
       function sendTyping(isTyping) {
         if (ws && ws.readyState === 1)
-          ws.send(JSON.stringify({ typing: isTyping }));
+          ws.send(JSON.stringify({ typing: isTyping })); // The backend auto-sets user/room!
       }
 
       function appendMessage(user, text) {
@@ -143,7 +156,8 @@
         ws = new WebSocket(
           (location.protocol === "https:" ? "wss://" : "ws://") +
             location.host +
-            "/ws"
+            "/ws?room=" +
+            encodeURIComponent(room)
         );
         ws.onopen = () => {
           status.textContent = "Connected!";
@@ -156,6 +170,7 @@
         ws.onmessage = (evt) => {
           try {
             const msg = JSON.parse(evt.data);
+            console.log("Received:", msg); // <-- Add this
             if (msg.typing) {
               showTyping(msg.user);
               setTimeout(clearTyping, TYPING_DELAY + 200);
@@ -163,7 +178,9 @@
               clearTyping();
               appendMessage(msg.user, msg.text);
             }
-          } catch {}
+          } catch (e) {
+            console.error("WS message error", e);
+          }
         };
       }
 

@@ -17,13 +17,21 @@ import (
 // Hub: maintains active clients and broadcasts messages to them with Redis persistence
 // ----------------------------------------------------------------------------
 
+type Hub struct {
+	rooms map[string]*Room
+	rdb   *redis.Client
+	ctx   context.Context
+}
+
 type Message struct {
+	Room   string `json:"room"`
 	User   string `json:"user"`
 	Text   string `json:"text,omitempty"`
 	Typing bool   `json:"typing,omitempty"`
 }
 
-type Hub struct {
+type Room struct {
+	name       string
 	clients    map[*websocket.Conn]string
 	broadcast  chan Message
 	register   chan *websocket.Conn
@@ -33,65 +41,83 @@ type Hub struct {
 	maxHistory int64
 }
 
-func newHub(rdb *redis.Client) *Hub {
-	return &Hub{
+func newRoom(name string, rdb *redis.Client, ctx context.Context, maxHistory int64) *Room {
+	return &Room{
+		name:       name,
 		clients:    make(map[*websocket.Conn]string),
 		broadcast:  make(chan Message),
 		register:   make(chan *websocket.Conn),
 		unregister: make(chan *websocket.Conn),
 		rdb:        rdb,
-		ctx:        context.Background(),
-		maxHistory: 100, // keep last 100 messages
+		ctx:        ctx,
+		maxHistory: maxHistory, // keep last 100 messages
+	}
+}
+func newHub(rdb *redis.Client) *Hub {
+	return &Hub{
+		rooms: make(map[string]*Room),
+		rdb:   rdb,
+		ctx:   context.Background(),
 	}
 }
 
-func (h *Hub) run() {
+func (hub *Hub) getOrCreateRoom(name string) *Room {
+	room, exists := hub.rooms[name]
+	if !exists {
+		room = newRoom(name, hub.rdb, hub.ctx, 100)
+		hub.rooms[name] = room
+		go room.run()
+	}
+	return room
+}
+
+func (r *Room) run() {
 	for {
 		select {
-		case conn := <-h.register:
-			log.Printf("[Hub] client registered, total: %d", len(h.clients))
+		case conn := <-r.register:
+			r.clients[conn] = ""
+			log.Printf("[Room:%s] client registered, total: %d", r.name, len(r.clients))
 
-			// Send chat history
-			msgs, err := h.rdb.LRange(h.ctx, "chat_history", -h.maxHistory, -1).Result()
+			key := "chat_history:" + r.name
+			msgs, err := r.rdb.LRange(r.ctx, key, -r.maxHistory, -1).Result()
 			if err != nil {
-				log.Printf("[Hub] error fetching history: %v", err)
+				log.Printf("[Room:%s] error fetching history: %v", r.name, err)
 			} else {
-				log.Printf("[Hub] sending %d history messages to new client", len(msgs))
+				log.Printf("[Room:%s] sending %d history messages to new client", r.name, len(msgs))
 				for _, raw := range msgs {
 					if err := conn.WriteMessage(websocket.TextMessage, []byte(raw)); err != nil {
-						log.Printf("[Hub] error sending history to client: %v", err)
+						log.Printf("[Room:%s] error sending history to client: %v", r.name, err)
 					}
 				}
 			}
 
-		case conn := <-h.unregister:
-			if _, ok := h.clients[conn]; ok {
-				delete(h.clients, conn)
+		case conn := <-r.unregister:
+			if _, ok := r.clients[conn]; ok {
+				delete(r.clients, conn)
 				conn.Close()
-				log.Printf("[Hub] client unregistered, total: %d", len(h.clients))
+				log.Printf("[Room:%s] client unregistered, total: %d", r.name, len(r.clients))
 			}
 
-		case msg := <-h.broadcast:
-			// Marshal and persist
+		case msg := <-r.broadcast:
 			b, err := json.Marshal(msg)
 			if err != nil {
-				log.Printf("[Hub] error marshaling message: %v", err)
+				log.Printf("[Room:%s] error marshaling message: %v", r.name, err)
 				continue
 			}
-			if err := h.rdb.RPush(h.ctx, "chat_history", b).Err(); err != nil {
-				log.Printf("[Hub] error persisting message: %v", err)
+			key := "chat_history:" + r.name
+			if err := r.rdb.RPush(r.ctx, key, b).Err(); err != nil {
+				log.Printf("[Room:%s] error persisting message: %v", r.name, err)
 			}
-			if err := h.rdb.LTrim(h.ctx, "chat_history", -h.maxHistory, -1).Err(); err != nil {
-				log.Printf("[Hub] error trimming history: %v", err)
+			if err := r.rdb.LTrim(r.ctx, key, -r.maxHistory, -1).Err(); err != nil {
+				log.Printf("[Room:%s] error trimming history: %v", r.name, err)
 			}
 
-			// Broadcast to active clients
-			for conn := range h.clients {
+			for conn := range r.clients {
 				if err := conn.WriteMessage(websocket.TextMessage, b); err != nil {
-					log.Printf("[Hub] broadcast error: %v", err)
-					h.unregister <- conn
+					log.Printf("[Room:%s] broadcast error: %v", r.name, err)
+					r.unregister <- conn
 				} else {
-					log.Printf("[Hub] broadcasted message from user %q to client", msg.User)
+					log.Printf("[Room:%s] broadcasted message from user %q to client", r.name, msg.User)
 				}
 			}
 		}
@@ -112,6 +138,11 @@ var upgrader = websocket.Upgrader{
 }
 
 func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
+	roomName := r.URL.Query().Get("room")
+	if roomName == "" {
+		roomName = "default"
+	}
+	log.Printf("[WS] Serving WebSocket for room %q", roomName)
 	log.Println("[WS] New WebSocket connection attempt")
 	// Validate JWT token
 	cookie, err := r.Cookie("token")
@@ -135,11 +166,11 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	}
 	log.Println("[WS] WebSocket upgraded")
 	// Register user immediately and associate user with connection
-	hub.clients[conn] = user
-	hub.register <- conn
+	room := hub.getOrCreateRoom(roomName)
+	room.register <- conn
 	defer func() {
 		log.Println("[WS] WebSocket closing/unregistering")
-		hub.unregister <- conn
+		room.unregister <- conn
 	}()
 
 	log.Printf("[WS] user %q joined", user)
@@ -177,9 +208,10 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			log.Printf("[WS] invalid message format: %v", err)
 			continue
 		}
-		incoming.User = user // always set from backend!
+		incoming.User = user
+		incoming.Room = roomName
 		log.Printf("[WS] received message from user %q: %+v", incoming.User, incoming)
-		hub.broadcast <- incoming
+		room.broadcast <- incoming
 	}
 }
 
@@ -320,7 +352,6 @@ func main() {
 	}()
 
 	hub := newHub(rdb)
-	go hub.run()
 	log.Println("[Main] Hub started")
 
 	fs := http.FileServer(http.Dir("./static"))
