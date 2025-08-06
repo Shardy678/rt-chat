@@ -37,12 +37,12 @@
 
     <script>
       let ws, username, token;
-      let room = ""; // ROOM-RELATED
+      let room = ""; 
       const msgs = document.getElementById("msgs");
       const input = document.getElementById("input");
       const status = document.getElementById("status");
       const sendbox = document.getElementById("sendbox");
-      const roomInput = document.getElementById("room-input"); // ROOM-RELATED
+      const roomInput = document.getElementById("room-input"); 
       const roomNameDiv = document.getElementById("roomname");
 
       // --- Auth UI refs
@@ -60,7 +60,7 @@
         e.preventDefault();
         const user = authUser.value.trim();
         const pass = authPass.value;
-        room = roomInput.value.trim() || "general"; // ROOM-RELATED
+        room = roomInput.value.trim() || "general"; 
         if (!user || !pass) {
           authStatus.textContent = "Username and password required.";
           return;
@@ -116,7 +116,7 @@
       function showChat() {
         auth.style.display = "none";
         document.getElementById("chat").style.display = "";
-        roomNameDiv.textContent = "Room: " + room; // ROOM-RELATED
+        roomNameDiv.textContent = "Room: " + room; 
         msgs.innerHTML = "";
         connect();
       }
@@ -135,7 +135,7 @@
 
       function sendTyping(isTyping) {
         if (ws && ws.readyState === 1)
-          ws.send(JSON.stringify({ typing: isTyping })); // The backend auto-sets user/room!
+          ws.send(JSON.stringify({ typing: isTyping })); 
       }
 
       function appendMessage(user, text) {
@@ -170,7 +170,7 @@
         ws.onmessage = (evt) => {
           try {
             const msg = JSON.parse(evt.data);
-            console.log("Received:", msg); // <-- Add this
+            console.log("Received:", msg);
             if (msg.typing) {
               showTyping(msg.user);
               setTimeout(clearTyping, TYPING_DELAY + 200);
