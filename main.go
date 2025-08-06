@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -39,10 +40,12 @@ type Room struct {
 	rdb        *redis.Client
 	ctx        context.Context
 	maxHistory int64
+	pubsub     *redis.PubSub
 }
 
 func newRoom(name string, rdb *redis.Client, ctx context.Context, maxHistory int64) *Room {
-	return &Room{
+	pubsub := rdb.Subscribe(ctx, "room:"+name)
+	room := &Room{
 		name:       name,
 		clients:    make(map[*websocket.Conn]string),
 		broadcast:  make(chan Message),
@@ -50,9 +53,26 @@ func newRoom(name string, rdb *redis.Client, ctx context.Context, maxHistory int
 		unregister: make(chan *websocket.Conn),
 		rdb:        rdb,
 		ctx:        ctx,
-		maxHistory: maxHistory, // keep last 100 messages
+		maxHistory: maxHistory,
+		pubsub:     pubsub,
+	}
+	go room.listenPubSub()
+	return room
+}
+
+func (r *Room) listenPubSub() {
+	for msg := range r.pubsub.Channel() {
+		var message Message
+		if err := json.Unmarshal([]byte(msg.Payload), &message); err == nil {
+			for conn := range r.clients {
+				if err := conn.WriteMessage(websocket.TextMessage, []byte(msg.Payload)); err != nil {
+					log.Printf("[Room:%s] error sending message to client: %v", r.name, err)
+				}
+			}
+		}
 	}
 }
+
 func newHub(rdb *redis.Client) *Hub {
 	return &Hub{
 		rooms: make(map[string]*Room),
@@ -78,6 +98,7 @@ func (r *Room) run() {
 			r.clients[conn] = ""
 			log.Printf("[Room:%s] client registered, total: %d", r.name, len(r.clients))
 
+			// Send chat history
 			key := "chat_history:" + r.name
 			msgs, err := r.rdb.LRange(r.ctx, key, -r.maxHistory, -1).Result()
 			if err != nil {
@@ -111,14 +132,8 @@ func (r *Room) run() {
 			if err := r.rdb.LTrim(r.ctx, key, -r.maxHistory, -1).Err(); err != nil {
 				log.Printf("[Room:%s] error trimming history: %v", r.name, err)
 			}
-
-			for conn := range r.clients {
-				if err := conn.WriteMessage(websocket.TextMessage, b); err != nil {
-					log.Printf("[Room:%s] broadcast error: %v", r.name, err)
-					r.unregister <- conn
-				} else {
-					log.Printf("[Room:%s] broadcasted message from user %q to client", r.name, msg.User)
-				}
+			if err := r.rdb.Publish(r.ctx, "room:"+r.name, b).Err(); err != nil {
+				log.Printf("[Room:%s] error publishing message: %v", r.name, err)
 			}
 		}
 	}
@@ -343,8 +358,12 @@ func loginHandler(rdb *redis.Client) http.HandlerFunc {
 func main() {
 	log.Println("[Main] Initializing Redis client")
 	// Initialize Redis client
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = "localhost:6379"
+	}
 	rdb := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
+		Addr: redisAddr,
 	})
 	defer func() {
 		log.Println("[Main] Closing Redis client")
